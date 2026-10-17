@@ -1,11 +1,16 @@
 package manager
 
 import (
+	"bytes"
+	"crypto/tls"
+	"encoding/base64"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -84,4 +89,38 @@ func scanProcess(processName string, isLCU bool) (*ClientInfo, error) {
 		}
 	}
 	return nil, fmt.Errorf("%s not running", processName)
+}
+
+// Makes request to endpoint. We're really only making post requests so we're not expecting anythign in return.
+// Used the process from: https://hextechdocs.dev/getting-started-with-the-lcu-api/
+func makeHTTPReq(method, url, password string, body []byte) error {
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	// Make expected authorization header "Basic + base64 encoded riot:password"
+	auth := base64.StdEncoding.EncodeToString([]byte("riot:" + password))
+	req.Header.Set("Authorization", "Basic "+auth)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Certificate is self-signed by riot so we ignore security checks.
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	// Make request
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Verify we succeeded
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("API returned non-200 status code: %d %s", resp.StatusCode, resp.Status)
+	}
+	return nil
 }
